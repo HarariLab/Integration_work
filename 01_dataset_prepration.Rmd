@@ -1,0 +1,231 @@
+Jai Babe Di
+Jai Guru Maa Ji
+
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+library(Seurat)
+library(qs)
+library(dplyr)
+
+setwd("~/integration_project/step_1/")
+```
+
+```{r}
+count <- readRDS("~/integration_project/step_1/ROSMAP.ImmuneCells.6regions.snRNAseq.counts.rds")
+meta.data <- readRDS("~/integration_project/step_1/ROSMAP.ImmuneCells.6regions.snRNAseq.meta.rds")
+
+ROSMAP_MIT <- CreateSeuratObject(counts = count, meta.data = meta.data)
+Idents(ROSMAP_MIT) <- "seurat_clusters"
+
+# select microglia clusters only
+ROSMAP_MIT_micro <- subset(ROSMAP_MIT, idents = c("9","13","14","15"), invert = TRUE)
+table(ROSMAP_MIT_micro$seurat_clusters)
+```
+
+
+
+```{r}
+meta.data %>% head()
+```
+
+
+```{r}
+
+Idents(ROSMAP_MIT_micro) -> ROSMAP_MIT_micro$Cell_type
+
+ROSMAP_MIT_micro$Cell_type  <- ifelse(ROSMAP_MIT_micro$Cell_type==0,"Homeostatic",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==1,"Neuronal_Surveillance",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==2,"Inflammatory_I",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==3,"Ribosome_Biogenesis",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==4,"Lipid_Processing",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==5,"Phagocytic",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==6,"Stress_Signature",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==7,"Glycolytic",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==8,"Inflammatory_II",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==10,"Inflammatory_III",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type==11,"Antiviral","Cycling")))))))))))
+
+table(ROSMAP_MIT_micro$Cell_type)
+
+```
+```{r}
+qsave(ROSMAP_MIT_micro,"ROSMAP_MIT_micro.qs",nthreads = 6)
+```
+
+
+
+```{r}
+## SCT Assay
+ROSMAP_MIT_micro <- SCTransform(ROSMAP_MIT_micro)
+
+qsave(ROSMAP_MIT_micro, "ROSMAP_MIT_micro_SCT.qs", nthreads = 6)
+```
+
+
+
+# correction of cell type for sct here and for RNA into 02_ROSMAP_cell_type_correction script beacuse I ran sacaling as per inthe manuscript
+```{r}
+ROSMAP_MIT_micro <- qread("ROSMAP_MIT_micro_SCT.qs", nthreads = 6)
+```
+
+
+```{r}
+
+# ROSMAP markers analysis
+
+ROSMAP_art_marker  <- read_excel("~/integration_project/step_1/SupplementalTables.combined.xlsx", sheet = 3)
+
+gene_list <- lapply(unique(ROSMAP_art_marker$microgliaState), function(x){
+gene <- ROSMAP_art_marker$gene[ROSMAP_art_marker$microgliaState == x]
+return(gene)
+})
+names(gene_list) <- c("Homeostatic","Neuronal_Surveillance",
+                      "Inflammatory_I","Ribosome_Biogenesis","Lipid_Processing",
+                      "Phagocytic","Stress_Signature","Glycolytic",
+                      "Inflammatory_II","Inflammatory_III","Antiviral","Cycling")
+```
+
+
+```{r}
+
+## Genescore - ROSMAP markers analysis with Seurat
+ROSMAP_MIT_micro = AddModuleScore(ROSMAP_MIT_micro,gene_list,name="Seurat")
+
+colnames(ROSMAP_MIT_micro@meta.data)[grep("Seurat",colnames(ROSMAP_MIT_micro@meta.data))] = 
+paste0(c("Homeostatic","Neuronal_Surveillance",
+                      "Inflammatory_I","Ribosome_Biogenesis","Lipid_Processing",
+                      "Phagocytic","Stress_Signature","Glycolytic",
+                      "Inflammatory_II","Inflammatory_III","Antiviral","Cycling"),sep="_","Seurat")
+
+```
+
+```{r}
+ROSMAP_MIT_micro$seurat_clusters <- droplevels(ROSMAP_MIT_micro$seurat_clusters)
+```
+
+
+```{r}
+
+Idents(ROSMAP_MIT_micro) <- "seurat_clusters"
+
+geneSigPlots = lapply(1:length(c("Homeostatic","Neuronal_Surveillance",
+                      "Inflammatory_I","Ribosome_Biogenesis","Lipid_Processing",
+                      "Phagocytic","Stress_Signature","Glycolytic",
+                      "Inflammatory_II","Inflammatory_III","Antiviral","Cycling")),function(ind){
+    
+    nm = paste0(c("Homeostatic","Neuronal_Surveillance",
+                      "Inflammatory_I","Ribosome_Biogenesis","Lipid_Processing",
+                      "Phagocytic","Stress_Signature","Glycolytic",
+                      "Inflammatory_II","Inflammatory_III","Antiviral","Cycling"),sep="_","Seurat")[ind]
+  
+  message(nm)
+  df = data.frame(Cluster = ROSMAP_MIT_micro$seurat_clusters, Sig =  ROSMAP_MIT_micro@meta.data[,nm], Sample = ROSMAP_MIT_micro$subject) 
+ # df <- subset(df, subset = (Sig > -0.1 & Sig < 0.1))
+  df2 = df
+  
+  tmp = unlist(lapply(levels(df2$Cluster),function(cl){
+    df2$cl = df2$Cluster == cl
+    message(cl)
+    re = lmer(Sig ~ cl + (1|Sample), data = df2)
+   return(sprintf('B=%s\nP=%s',signif(summary(re)$coefficients[2,'Estimate'], digits=1),signif(summary(re)$coefficients[2,'Pr(>|t|)'], digits=3)))
+      }))
+ 
+ p = ggviolin(df2,x='Cluster',y='Sig',fill = 'Cluster',draw_quantiles=c(0.25,0.5,0.75),trim=T) +
+   ggtitle(sprintf('%s',nm))+ 
+   #geom_jitter(size=0.01,alpha =0.2)+ 
+   stat_summary(fun = "mean", geom = "crossbar", width = 0.5, colour = "red")+
+   stat_summary(fun = mean, geom = "text", col = "black", vjust = -1, aes(label = paste("Mean:", round(..y.., digits = 2)))) +
+ ylab('Significant upregulated genes') + xlab('Integrated clusters') + rremove('legend')  +theme_minimal()
+   
+ p = p + annotate("text", x = 1:2:3:4:5:6:7:8:9:10:11:12, y = max(df$Sig)+0.11, label = tmp, size = 5)+ theme(text = element_text(size = 12)) + theme(text = element_text(size = 20, face = "bold"))
+ p <- p+theme(axis.text.x = element_text(angle = 45, hjust = 1))+NoLegend()
+return(p)
+  })
+
+pdf("Genescore_ROSMAP_art.mark_Seurat_SCT.pdf", width = 15, height = 12)
+geneSigPlots
+```
+
+
+```{r}
+# we did because we found that the MG0-12 cluster labeling not going with gene expression. They have missing new labeling information
+# cell_type_as_per_bioconservtion
+
+ROSMAP_MIT_micro <- qread("ROSMAP_MIT_micro.qs", nthreads = 6)
+
+ROSMAP_MIT_micro$Cell_type_wd_discrepancy <- ROSMAP_MIT_micro$Cell_type
+
+
+ROSMAP_MIT_micro$Cell_type <- ROSMAP_MIT_micro$seurat_clusters
+
+ROSMAP_MIT_micro$Cell_type  <- ifelse(ROSMAP_MIT_micro$Cell_type==0,"Homeostatic-ROSMAP_MIT",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==1,"Neuronal_Surveillance",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==2,"Inflammatory_I",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==3,"Inflammatory_II",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==4,"Phagocytic",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==5,"Ribosome_Biogenesis",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==6,"Glycolytic",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==7,"Stress_Signature",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==8,"Antiviral",
+                                      ifelse(ROSMAP_MIT_micro$Cell_type ==10,"Inflammatory_III",
+                     ifelse(ROSMAP_MIT_micro$Cell_type ==11,"Cycling","Lipid_Processing")))))))))))
+
+table(ROSMAP_MIT_micro$Cell_type)
+
+ROSMAP_MIT_micro$seurat_clusters <- droplevels(ROSMAP_MIT_micro$seurat_clusters)
+
+qsave(ROSMAP_MIT_micro, "ROSMAP_MIT_micro_wd_correct_cell_type.qs", nthreads = 6)
+
+```
+```{r}
+ROSMAP_MIT_micro <- qread("ROSMAP_MIT_micro_wd_correct_cell_type.qs", nthreads = 6)
+```
+
+
+
+
+```{r}
+KD_BJ_MD_filtered = readRDS("/home/a.garg/knight_ADRC/Liger_integration/SCT_data/nebula_data/KD_BJ_MD_filtered.RDS")
+KD_BJ_MD_filtered$Cell_type[KD_BJ_MD_filtered$Cell_type == "CXCL10_Interferon"] <- "IFN"
+KD_BJ_MD_filtered$seurat_clusters[KD_BJ_MD_filtered$seurat_clusters == "5"] <- "2"
+DefaultAssay(KD_BJ_MD_filtered) <- "RNA"
+
+ meta.data2 <- KD_BJ_MD_filtered@meta.data %>% 
+                          dplyr::select(
+                          orig.ident, 
+                          nFeature_RNA,
+                          percent.mt,
+                          percent.rbs,
+                           Sample_ID,
+                           Gender,
+                           PMI,
+                           AOD,
+                           Status,
+                           nAPOE, 
+                           ADAD, 
+                           batch,
+                           Cell_type,
+                          Cell_type_old)
+ 
+KD_BJ_MD_filtered@meta.data <- meta.data2
+KD_BJ_MD_filtered@meta.data$Cell_type[KD_BJ_MD_filtered@meta.data$Cell_type =="DAM"] <- "Activated"
+
+qsave(KD_BJ_MD_filtered,"KD_BJ_MD_filtered.qs",nthreads = 6)
+
+KD_BJ_MD_filtered@meta.data$Cell_type %>% table
+
+```
+
+
+
+```{r}
+save.image(file = "01_integration_data")
+dev.off()
+```
+
