@@ -1,0 +1,37 @@
+Jai Babe Di
+Jai Guru Maa Ji
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# load necessary packages
+library(openxlsx)
+library(gtools)
+
+setwd("/home/a.garg/integration_project/step_15/run_1/nebula_output")
+
+# List the names of text files
+files = system('ls /home/a.garg/integration_project/step_15/run_1/nebula_output/nebula_compareSubclusters_microglia*txt',intern=T)
+# read and save into excel
+all_excel = lapply(files,function(f){
+	tmp = read.table(f,stringsAsFactors=F,head=T,sep='\t')
+	name<- gsub(".*/nebula_compareSubclusters_microglia_(\\d+)_(\\D+|\\d+)_.*", "\\1_\\2",f)
+	write.xlsx(tmp, file = paste0("microglia",name,".xlsx"), sheetName = name, append = FALSE)
+	
+})
+# combined excel files into a wb
+
+all_files <- list.files(pattern = "^microglia*") %>% mixedsort()
+wb <- createWorkbook()
+for(file in all_files) {
+    df <- read.xlsx(file)
+    addWorksheet(wb,file)
+    writeData(wb,file,df)
+}
+saveWorkbook(wb,'Microglia_nebula_ouput.xlsx',overwrite=TRUE)
+
+
+```
+
