@@ -1,0 +1,173 @@
+Jai Babe Di
+Jai Guru Maa Ji
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(glmmTMB)
+```
+
+
+
+```{r}
+n1 <- qread("/home/a.garg/integration_project/step_10/ROSMAP_edited_cell_type/Allfour_SCT_integration_layer_wdedited_meta.qs", nthreads = 6)
+Idents(n1) <- "cca_cluster"
+
+n1_subset <- subset(n1, subset = batch =="BJ" )
+n2_subset <- subset(n1, subset = batch =="KD" )
+n3_subset <- subset(n1, subset = batch =="ROSMAP_MIT")
+
+tmp_pheno = NULL
+```
+
+
+```{r}
+
+	clusterCounts = table(n1_subset$dataset,n1_subset$cca_cluster)
+	totalCellType = rowSums(clusterCounts)
+	clusterCounts = clusterCounts/totalCellType
+	
+	pheno = data.frame(rbind(clusterCounts))
+	
+	phenoFile = read.csv('/home/brasel/SingleCellProjects/MyProjects/67BrainsPaper/Brain_pheno_jorge.csv',row.names=2)
+	phenoFile = phenoFile[rownames(pheno),]
+	
+	### Add in Age of Death ###
+	AOD = unique(n@meta.data[,c('Sample_ID','AOD')])
+	pheno = merge(pheno,AOD,by.x='row.names',by.y='Sample_ID')
+	pheno$AOD <- as.numeric(pheno$AOD)
+	
+```
+
+
+```{r}
+col_man<- c('#7FC97F','#BEAED4','#65d1b6','#f7f77b',
+'#386CB0','#F0027F','#BF5B17','#666666',
+'#1B9E77','#ffc192','#7570B3','#82536b',
+'#66A61E','#E6AB02','#A6761D','#6a0404',
+'#A6CEE3','#1F78B4')
+```
+
+
+```{r}
+df <-
+table(n1_subset$dataset,n1_subset$cca_cluster) %>%  as.data.frame() %>% 
+  group_by(Var1) %>% mutate(frac = Freq / sum(Freq) * 100) %>% 
+  ungroup() %>% filter(frac > 0) %>%
+  dplyr::rename(
+    "CCA cluster" = Var2,
+    "Datasets" = Var1,
+    "Percentage" = frac
+  )
+df$`CCA cluster` <- factor(df$`CCA cluster`, levels = as.character(0:99))
+p <-
+  ggplot(df, aes(x = Datasets, y = Percentage, fill = `CCA cluster`)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = col_man) +
+  #theme_bw() +
+  #ggtitle("")+
+  theme(panel.background=element_rect(fill = "white",color='white'),
+			axis.text.x = element_text(color='black',size=20,angle = 90, vjust = 0.5, hjust=1), 
+			axis.text.y = element_text(color='black',size=20), axis.title.y = element_text(size=20),
+			axis.line = element_line(linetype='blank'),axis.ticks = element_blank(),
+			legend.title = element_text(size=20),
+			legend.text = element_text(size=16)) +
+			labs(x=element_blank(),fill=str_wrap('Integrated clusters',width=30))
+
+p
+
+```
+
+```{r}
+df <-
+table(n3_subset$ADdiag3types,n3_subset$cca_cluster) %>%  as.data.frame() %>% 
+  group_by(Var1) %>% mutate(frac = Freq / sum(Freq) * 100) %>% 
+  ungroup() %>% filter(frac > 0) %>%
+  dplyr::rename(
+     "ADdiag3types" = Var1,
+    "CCA cluster" = Var2,
+    "Percentage" = frac
+  )
+df$`CCA cluster` <- factor(df$`CCA cluster`, levels = as.character(0:99))
+df$ADdiag3types <- factor(df$ADdiag3types, levels = c("nonAD","earlyAD","lateAD"))
+
+p <-
+  ggplot(df, aes(x = ADdiag3types, y = Percentage, fill = `CCA cluster`)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = col_man) +
+  #theme_bw() +
+  #ggtitle("")+
+  theme(panel.background=element_rect(fill = "white",color='white'),
+			axis.text.x = element_text(color='black',size=20,angle = 90, vjust = 0.5, hjust=1), 
+			axis.text.y = element_text(color='black',size=20), axis.title.y = element_text(size=20),
+			axis.line = element_line(linetype='blank'),axis.ticks = element_blank(),
+			legend.title = element_text(size=20),
+			legend.text = element_text(size=16)) +
+			labs(x=element_blank(),fill=str_wrap('Integrated clusters',width=30))
+
+p
+```
+
+```{r}
+pheno = read.csv('/home/a.garg/integration_project/step_17/Brain_pheno_jorge.csv',head=T)
+
+
+n2_subset@meta.data = merge(n2_subset@meta.data,pheno[,c('Sample','TREM2_type','Final_Status','SEX','APOE','rs1582763')],by.x='Sample.ID',by.y='Sample')
+rownames(n2_subset@meta.data) = n2_subset$barcode
+
+n2_subset$TREM2_type = as.character(n2_subset$TREM2_type)
+
+n2_subset$TREM2_type[is.na(n2_subset$TREM2_type)] = 'Wild Type'
+n2_subset$TREM2_all = n2_subset$TREM2_type
+n2_subset$TREM2_all[n2_subset$TREM2_all != 'Wild Type'] = 'TREM2'
+n2_subset$TREM2_reduced = n2_subset$TREM2_all
+n2_subset$TREM2_reduced[n2_subset$TREM2_type %in% c('R47H','R62H','H157Y')] = 'TREM2 Reduced'
+n2_subset$TREM2_reduced[n2_subset$TREM2_reduced != 'TREM2 Reduced'] = 'Other'
+n2_subset$SEX = as.character(n2_subset$SEX)
+n2_subset$SEX[n2_subset$SEX == 1] = 'Male'
+n2_subset$SEX[n2_subset$SEX == 2] = 'Female'
+n2_subset$APOE = as.character(n2_subset$APOE)
+n2_subset$rs1582763 = factor(n2_subset$rs1582763,levels=c('GG','AG','AA'))
+n2_subset$Final_Status = as.character(n2_subset$Final_Status)
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_ADAD_noncarrier'] = 'Neuro_CO'
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_DLB'] = 'Neuro_OT'
+
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_OT'] = 'OTH'
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_AD'] = 'sAD'
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_CO'] = 'CO'
+n2_subset$Final_Status[n2_subset$Final_Status== 'Neuro_Presyntomatic'] = 'Pres'
+n2_subset$Final_Status[n2_subset$Final_Status== 'ADAD'] = 'ADAD'
+
+```
+
+```{r}
+df <-
+table(n2_subset$Final_Status,n2_subset$cca_cluster) %>%  as.data.frame() %>% 
+  group_by(Var1) %>% mutate(frac = Freq / sum(Freq) * 100) %>% 
+  ungroup() %>% filter(frac > 0) %>%
+  dplyr::rename(
+     "ADdiag3types" = Var1,
+    "CCA cluster" = Var2,
+    "Percentage" = frac
+  )
+df$`CCA cluster` <- factor(df$`CCA cluster`, levels = as.character(0:99))
+
+p <-
+  ggplot(df, aes(x = ADdiag3types, y = Percentage, fill = `CCA cluster`)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = col_man) +
+  #theme_bw() +
+  #ggtitle("")+
+  theme(panel.background=element_rect(fill = "white",color='white'),
+			axis.text.x = element_text(color='black',size=20,angle = 90, vjust = 0.5, hjust=1), 
+			axis.text.y = element_text(color='black',size=20), axis.title.y = element_text(size=20),
+			axis.line = element_line(linetype='blank'),axis.ticks = element_blank(),
+			legend.title = element_text(size=20),
+			legend.text = element_text(size=16)) +
+			labs(x=element_blank(),fill=str_wrap('Integrated clusters',width=30))
+p
+```
+
