@@ -1,6 +1,3 @@
-# Jai Babe Di
-# Jai Guru Maa Ji
-
 
 library(Seurat)
 library(qs)
